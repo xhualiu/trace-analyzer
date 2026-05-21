@@ -240,3 +240,4 @@ See parent project for license information.
 - [Technical Specification](../spec.md) - Complete implementation spec
 - [Specification Review](../spec-review.md) - Gap analysis and recommendations
 - [Sample Trace File](../testfile/traces.xml) - Test fixture
+<!-- Deployment trigger: Thu May 21 11:38:16 PDT 2026 -->
