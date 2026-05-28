@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { ChevronDown, ChevronRight } from 'lucide-svelte';
+	import { ChevronDown, ChevronRight, Filter, X } from 'lucide-svelte';
 	import type { TraceEvent } from '$lib/types';
-	import { selectedEvent } from '$lib/stores';
+	import { selectedEvent, activeThreads } from '$lib/stores';
 	import { onMount, afterUpdate } from 'svelte';
 
 	export let events: TraceEvent[] = [];
@@ -9,6 +9,15 @@
 	let expandedEvents = new Set<number>();
 	let eventElements = new Map<number, HTMLElement>();
 	let containerElement: HTMLElement;
+
+	// Track thread filter state
+	let threadFilterActive = false;
+	let filteredThreadName = '';
+	
+	$: {
+		threadFilterActive = $activeThreads.length === 1;
+		filteredThreadName = threadFilterActive ? $activeThreads[0] : '';
+	}
 
 	function toggleExpand(eventId: number | undefined) {
 		if (eventId === undefined) return;
@@ -23,6 +32,14 @@
 
 	function selectEvent(event: TraceEvent) {
 		selectedEvent.set(event);
+	}
+
+	function filterByThread(threadName: string) {
+		activeThreads.set([threadName]);
+	}
+
+	function clearThreadFilter() {
+		activeThreads.set([]);
 	}
 
 	// Function to register element reference
@@ -80,10 +97,31 @@
 
 <div class="h-full flex flex-col bg-gray-50">
 	<div class="p-4 border-b border-gray-200 bg-white">
-		<h2 class="text-lg font-semibold text-gray-900">
-			Filtered Events ({events.length})
-		</h2>
-		<p class="text-xs text-gray-500 mt-1">Click to select, expand for details</p>
+		<div class="flex items-center justify-between gap-2">
+			<h2 class="text-lg font-semibold text-gray-900">
+				Filtered Events ({events.length})
+			</h2>
+			{#if threadFilterActive}
+				<div class="flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 rounded-md text-xs">
+					<Filter size={14} />
+					<span class="font-medium">Thread: {filteredThreadName}</span>
+					<button
+						on:click={clearThreadFilter}
+						class="ml-1 hover:bg-blue-200 rounded p-0.5 transition-colors"
+						title="Clear thread filter"
+					>
+						<X size={14} />
+					</button>
+				</div>
+			{/if}
+		</div>
+		<p class="text-xs text-gray-500 mt-1">
+			{#if threadFilterActive}
+				Showing only events from thread: {filteredThreadName}
+			{:else}
+				Click to select, expand for details. Double-click thread to filter.
+			{/if}
+		</p>
 	</div>
 
 	<div class="flex-1 overflow-auto" bind:this={containerElement}>
@@ -143,7 +181,19 @@
 									{/if}
 								</div>
 								<div class="text-xs text-gray-600 truncate">
-									Thread: {event.thread}
+									Thread: <span
+										class="hover:underline cursor-pointer"
+										on:dblclick|stopPropagation={() => filterByThread(event.thread)}
+										role="button"
+										tabindex="0"
+										on:keydown={(e) => {
+											if (e.key === 'Enter') {
+												e.preventDefault();
+												e.stopPropagation();
+												filterByThread(event.thread);
+											}
+										}}
+									>{event.thread}</span>
 								</div>
 								{#if event.type === 'sql' && event.sqlStatement}
 									<div class="text-xs text-gray-500 truncate mt-1">
