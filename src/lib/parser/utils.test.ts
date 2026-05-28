@@ -232,6 +232,108 @@ describe('TransactionSpanMatcher', () => {
 		const matched = matcher.matchEnd('thread-1');
 		expect(matched).toBeNull();
 	});
+
+	it('should track line numbers with begin events', () => {
+		matcher.registerBegin('thread-1', 1, 1000, 100);
+		
+		const matched = matcher.matchEnd('thread-1');
+		
+		expect(matched).not.toBeNull();
+		expect(matched!.lineNumber).toBe(100);
+	});
+
+	it('should return line number when matching', () => {
+		matcher.registerBegin('thread-1', 1, 1000, 8663);
+		matcher.registerBegin('thread-1', 2, 2000, 8700);
+		
+		const first = matcher.matchEnd('thread-1');
+		const second = matcher.matchEnd('thread-1');
+		
+		expect(first!.lineNumber).toBe(8700); // Most recent
+		expect(second!.lineNumber).toBe(8663);
+	});
+
+	it('should handle missing line numbers gracefully', () => {
+		matcher.registerBegin('thread-1', 1, 1000); // No line number
+		
+		const matched = matcher.matchEnd('thread-1');
+		
+		expect(matched).not.toBeNull();
+		expect(matched!.lineNumber).toBeUndefined();
+	});
+
+	it('should track line numbers independently per thread', () => {
+		matcher.registerBegin('thread-1', 1, 1000, 100);
+		matcher.registerBegin('thread-2', 2, 2000, 200);
+		
+		const thread1Match = matcher.matchEnd('thread-1');
+		const thread2Match = matcher.matchEnd('thread-2');
+		
+		expect(thread1Match!.lineNumber).toBe(100);
+		expect(thread2Match!.lineNumber).toBe(200);
+	});
+
+	it('should create synthetic spans for unmatched begins', () => {
+		const matcher = new TransactionSpanMatcher();
+		
+		// Register some unmatched begins
+		matcher.registerBegin('thread-1', 1, 1000, 10);
+		matcher.registerBegin('thread-1', 2, 2000, 20);
+		matcher.registerBegin('thread-2', 3, 3000, 30);
+		
+		// Create synthetic spans
+		const syntheticSpans = matcher.createSyntheticSpansForUnmatchedBegins(100);
+		
+		expect(syntheticSpans).toHaveLength(3);
+		
+		// Check first span
+		expect(syntheticSpans[0]).toEqual({
+			thread: 'thread-1',
+			startTime: 1000,
+			spanStartEventId: 1,
+			spanStartLine: 10,
+			spanEndLine: 100
+		});
+		
+		// Check second span
+		expect(syntheticSpans[1]).toEqual({
+			thread: 'thread-1',
+			startTime: 2000,
+			spanStartEventId: 2,
+			spanStartLine: 20,
+			spanEndLine: 100
+		});
+		
+		// Check third span
+		expect(syntheticSpans[2]).toEqual({
+			thread: 'thread-2',
+			startTime: 3000,
+			spanStartEventId: 3,
+			spanStartLine: 30,
+			spanEndLine: 100
+		});
+	});
+
+	it('should return empty array when no unmatched begins', () => {
+		const matcher = new TransactionSpanMatcher();
+		
+		const syntheticSpans = matcher.createSyntheticSpansForUnmatchedBegins(100);
+		
+		expect(syntheticSpans).toHaveLength(0);
+	});
+
+	it('should handle missing line numbers in synthetic spans', () => {
+		const matcher = new TransactionSpanMatcher();
+		
+		// Register begin without line number
+		matcher.registerBegin('thread-1', 1, 1000);
+		
+		const syntheticSpans = matcher.createSyntheticSpansForUnmatchedBegins(100);
+		
+		expect(syntheticSpans).toHaveLength(1);
+		expect(syntheticSpans[0].spanStartLine).toBe(0);
+		expect(syntheticSpans[0].spanEndLine).toBe(100);
+	});
 });
 
 describe('transaction lifecycle mapping expectations', () => {

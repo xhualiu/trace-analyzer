@@ -11,6 +11,7 @@
 		dbStats,
 		activeThreads,
 		minDuration,
+		minSpanDuration,
 		activeSqlModes,
 		methodFilter,
 		availableThreads,
@@ -28,7 +29,8 @@
 		showSqlUpdate,
 		showSqlDelete,
 		showSqlInsert,
-		showSqlOther
+		showSqlOther,
+		expandedEventIds
 	} from '$lib/stores';
 	import { db, getDatabaseStats } from '$lib/db';
 	import TimelineCanvas from '$lib/components/TimelineCanvas.svelte';
@@ -72,6 +74,39 @@
 		// Apply filters
 		const results = await query.toArray();
 
+		// First pass: identify which spans pass the duration filter
+		const validSpanIds = new Set<number>();
+		const validSpanLineRanges: Array<{ minLine: number; maxLine: number; thread: string }> = [];
+		
+		for (const event of results) {
+			if (event.type === 'tx_span' && event.duration >= $minSpanDuration) {
+				if (event.id) {
+					validSpanIds.add(event.id);
+				}
+				// Track line ranges of valid spans for filtering child events
+				if (event.spanStartLine !== undefined && event.spanEndLine !== undefined) {
+					const minLine = Math.min(event.spanStartLine, event.spanEndLine);
+					const maxLine = Math.max(event.spanStartLine, event.spanEndLine);
+					validSpanLineRanges.push({ minLine, maxLine, thread: event.thread });
+				}
+			}
+		}
+
+		// Helper function to check if an event belongs to a valid span
+		const belongsToValidSpan = (event: typeof results[0]): boolean => {
+			if (!event.lineNumber || !event.thread) return false;
+			
+			// Check if event falls within any valid span's line range
+			for (const range of validSpanLineRanges) {
+				if (event.thread === range.thread &&
+				    event.lineNumber >= range.minLine &&
+				    event.lineNumber <= range.maxLine) {
+					return true;
+				}
+			}
+			return false;
+		};
+
 		return results.filter((event) => {
 			// Thread filter
 			if ($activeThreads.length > 0 && !$activeThreads.includes(event.thread)) {
@@ -96,7 +131,7 @@
 
 			// Type-specific filters
 			if (event.type === 'sql') {
-				// Duration filter
+				// SQL duration filter (separate from span duration)
 				if (event.duration < $minDuration) return false;
 
 				// SQL mode filter
@@ -120,6 +155,19 @@
 				}
 			}
 
+			// Transaction span duration filter (separate from SQL duration)
+			if (event.type === 'tx_span') {
+				if (event.duration < $minSpanDuration) return false;
+			}
+
+			// CRITICAL: If span duration filter is active, hide child events of filtered-out spans
+			if ($minSpanDuration > 0 && (event.type === 'sql' || event.type === 'tx_event')) {
+				// Only show events that belong to a valid span
+				if (!belongsToValidSpan(event)) {
+					return false;
+				}
+			}
+
 			return true;
 		});
 	});
@@ -129,6 +177,38 @@
 		if ($activeThreads.length === 0) return true;
 		return $activeThreads.includes(thread);
 	});
+
+	// Handle double-click on timeline events to expand them in EventList
+	function handleEventDoubleClick(event: TraceEvent) {
+		if (!event.id) return;
+		
+		// Select the event
+		selectedEvent.set(event);
+		
+		// Expand the event in EventList
+		expandedEventIds.update(set => {
+			const newSet = new Set(set);
+			newSet.add(event.id!);
+			
+			// If this is a SQL event and we're in single-thread filtered view,
+			// also expand its parent span (if it has one)
+			if (event.type === 'sql' && $activeThreads.length === 1 && event.lineNumber) {
+				// Find the parent span by checking which span contains this event's line number
+				const parentSpan = ($timelineData || []).find(e => {
+					if (e.type !== 'tx_span' || !e.id) return false;
+					const minLine = Math.min(e.spanStartLine || 0, e.spanEndLine || 0);
+					const maxLine = Math.max(e.spanStartLine || 0, e.spanEndLine || 0);
+					return event.lineNumber! >= minLine && event.lineNumber! <= maxLine;
+				});
+				
+				if (parentSpan?.id) {
+					newSet.add(parentSpan.id);
+				}
+			}
+			
+			return newSet;
+		});
+	}
 
 	onMount(async () => {
 		// Load database stats on mount
@@ -312,7 +392,7 @@
 						<svelte:fragment slot="first">
 							<!-- Top: Event List (Full Width) -->
 							<div class="h-full">
-								{#if $timelineData}
+								{#if $timelineData && Array.isArray($timelineData)}
 									<EventList events={$timelineData} />
 								{/if}
 							</div>
@@ -323,7 +403,11 @@
 							<div class="h-full relative border-t border-gray-200">
 								{#if $timelineData && $timelineData.length > 0}
 									<div class="h-full w-full overflow-auto">
-										<TimelineCanvas events={$timelineData} {threads} />
+										<TimelineCanvas
+											events={$timelineData}
+											{threads}
+											onEventDoubleClick={handleEventDoubleClick}
+										/>
 									</div>
 								{:else}
 									<div class="h-full flex items-center justify-center bg-white">

@@ -10,7 +10,8 @@ import {
 	parseParameter,
 	normalizeTxLifecycleEvent,
 	SyntheticOffsetCalculator,
-	TransactionSpanMatcher
+	TransactionSpanMatcher,
+	findLongestCommonCallStackSuffix
 } from '../parser/utils';
 
 // Constants from spec
@@ -32,6 +33,7 @@ interface ParserState {
 	parseWarnings: string[];
 	currentLineNumber: number; // Track actual XML file line number
 	eventStartLine: number; // Line number where current event started
+	lastLineNumber: number; // Track the last line number in the file
 }
 
 let state: ParserState;
@@ -53,7 +55,8 @@ function initState(): void {
 		spanMatcher: new TransactionSpanMatcher(),
 		parseWarnings: [],
 		currentLineNumber: 1, // Start at line 1
-		eventStartLine: 0
+		eventStartLine: 0,
+		lastLineNumber: 0
 	};
 }
 
@@ -264,50 +267,74 @@ function handleCloseTagSync(name: string): void {
 				state.eventBuffer.push(txEvent);
 				state.totalEvents++;
 			}
-			// DISABLED: span matching commented out per user request
 			else if (txEvent.txEvent === 'begin') {
 				txEvent.txPairStatus = 'unmatched';
 				state.eventBuffer.push(txEvent);
 				state.totalEvents++;
 
-				// DISABLED: Register begin using in-worker sequence position as provisional correlation id
-				// state.spanMatcher.registerBegin(txEvent.thread, state.totalEvents, txEvent.startTime);
+				// Register begin with line number and call stack for span matching
+				state.spanMatcher.registerBegin(
+					txEvent.thread,
+					state.totalEvents,
+					txEvent.startTime,
+					txEvent.lineNumber,
+					txEvent.callStack
+				);
 			} else if (txEvent.txEvent === 'commit' || txEvent.txEvent === 'rollback') {
-				// DISABLED: tx_span calculation commented out per user request
 				// Try to match with begin
-				// const matchedBegin = state.spanMatcher.matchEnd(txEvent.thread);
+				const matchedBegin = state.spanMatcher.matchEnd(txEvent.thread);
 
-				// if (matchedBegin) {
-				// 	// Create derived span
-				// 	const span: TraceEvent = {
-				// 		type: 'tx_span',
-				// 		thread: txEvent.thread,
-				// 		startTime: matchedBegin.startTime,
-				// 		duration: Math.max(0, txEvent.startTime - matchedBegin.startTime),
-				// 		txEvent: txEvent.txEvent,
-				// 		sourceFile: state.metadata.sourceFile,
-				// 		spanStartEventId: matchedBegin.eventId,
-				// 		spanEndEventId: state.totalEvents + 1, // provisional sequence id
-				// 		txPairStatus: 'matched',
-				// 		lineNumber: txEvent.lineNumber // Use same line number as the end event
-				// 	};
+				if (matchedBegin) {
+					// Create derived span with line numbers and common call stack suffix
+					const commonCallStack = findLongestCommonCallStackSuffix(matchedBegin.callStack, txEvent.callStack);
+					
+					const span: TraceEvent = {
+						type: 'tx_span',
+						thread: txEvent.thread,
+						startTime: matchedBegin.startTime,
+						duration: Math.max(0, txEvent.startTime - matchedBegin.startTime),
+						txEvent: txEvent.txEvent,
+						sourceFile: state.metadata.sourceFile,
+						spanStartEventId: matchedBegin.eventId,
+						spanEndEventId: state.totalEvents + 1, // provisional sequence id
+						spanStartLine: matchedBegin.lineNumber,
+						spanEndLine: txEvent.lineNumber,
+						txPairStatus: 'matched',
+						lineNumber: txEvent.lineNumber, // Use same line number as the end event
+						callStack: commonCallStack // Use longest common suffix from bottom
+					};
 
-				// 	txEvent.txPairStatus = 'matched';
-				// 	state.eventBuffer.push(txEvent);
-				// 	state.totalEvents++;
-				// 	state.eventBuffer.push(span);
-				// 	state.totalEvents++;
-				// } else {
-				// 	// No matching begin found
-				// 	txEvent.txPairStatus = 'unmatched';
-				// 	state.eventBuffer.push(txEvent);
-				// 	state.totalEvents++;
-				// }
-				
-				// Simplified: just store the commit/rollback event without span matching
-				txEvent.txPairStatus = 'unmatched';
-				state.eventBuffer.push(txEvent);
-				state.totalEvents++;
+					txEvent.txPairStatus = 'matched';
+					state.eventBuffer.push(txEvent);
+					state.totalEvents++;
+					state.eventBuffer.push(span);
+					state.totalEvents++;
+				} else {
+					// No matching begin found - create synthetic span from line 1 to this end event
+					// Use the end event's call stack since there's no begin event
+					const syntheticSpan: TraceEvent = {
+						type: 'tx_span',
+						thread: txEvent.thread,
+						startTime: txEvent.startTime, // Use end event's time as best estimate
+						duration: 0, // Unknown duration
+						txEvent: txEvent.txEvent,
+						sourceFile: state.metadata.sourceFile,
+						spanStartEventId: 0, // No actual begin event
+						spanEndEventId: state.totalEvents + 1,
+						spanStartLine: 1, // Assume span starts from beginning of file
+						spanEndLine: txEvent.lineNumber,
+						txPairStatus: 'unmatched',
+						lineNumber: txEvent.lineNumber,
+						callStack: txEvent.callStack, // Use end event's call stack
+						parseWarnings: ['No matching begin event found - synthetic span created from file start']
+					};
+
+					txEvent.txPairStatus = 'unmatched';
+					state.eventBuffer.push(txEvent);
+					state.totalEvents++;
+					state.eventBuffer.push(syntheticSpan);
+					state.totalEvents++;
+				}
 			} else {
 				// Unknown tx event type
 				state.eventBuffer.push(txEvent);
@@ -378,7 +405,33 @@ async function parseFile(file: File): Promise<void> {
 
 		parser.close();
 
-		// Flush remaining events
+		// Update last line number
+		state.lastLineNumber = state.currentLineNumber;
+
+		// Create synthetic spans for any unmatched begins
+		const syntheticSpans = state.spanMatcher.createSyntheticSpansForUnmatchedBegins(state.lastLineNumber);
+		for (const spanData of syntheticSpans) {
+			const syntheticSpan: TraceEvent = {
+				type: 'tx_span',
+				thread: spanData.thread,
+				startTime: spanData.startTime,
+				duration: 0, // Unknown duration since no end event
+				txEvent: 'commit', // Assume commit for display purposes
+				sourceFile: state.metadata.sourceFile,
+				spanStartEventId: spanData.spanStartEventId,
+				spanEndEventId: 0, // No actual end event
+				spanStartLine: spanData.spanStartLine,
+				spanEndLine: spanData.spanEndLine,
+				txPairStatus: 'unmatched',
+				lineNumber: spanData.spanStartLine,
+				callStack: spanData.callStack, // Derive call stack from begin event
+				parseWarnings: ['No matching end event found - synthetic span created to file end']
+			};
+			state.eventBuffer.push(syntheticSpan);
+			state.totalEvents++;
+		}
+
+		// Flush remaining events (including synthetic spans)
 		await flushBuffer();
 
 		// Send completion

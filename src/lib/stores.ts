@@ -12,7 +12,8 @@ export type WorkerStatus = 'idle' | 'parsing' | 'persisting' | 'complete' | 'err
 // Filter state
 export const activeThreads = writable<string[]>([]);
 export const methodFilter = writable<string>('');
-export const minDuration = writable<number>(0);
+export const minDuration = writable<number>(0); // For SQL events only
+export const minSpanDuration = writable<number>(0); // For transaction spans only
 export const activeSqlModes = writable<string[]>([]);
 
 // SQL statement type filters (SELECT, UPDATE, DELETE, INSERT, etc.)
@@ -31,6 +32,7 @@ export const showSqlEvents = writable<boolean>(true);
 
 // UI state
 export const selectedEvent = writable<TraceEvent | null>(null);
+export const expandedEventIds = writable<Set<number>>(new Set());
 export const workerProgress = writable<number>(0);
 export const workerStatus = writable<WorkerStatus>('idle');
 export const uiError = writable<string | null>(null);
@@ -64,6 +66,7 @@ export function resetFilters(): void {
 	activeThreads.set([]);
 	methodFilter.set('');
 	minDuration.set(0);
+	minSpanDuration.set(0);
 	activeSqlModes.set([]);
 	showSqlSelect.set(true);
 	showSqlUpdate.set(true);

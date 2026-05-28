@@ -11,6 +11,7 @@
 
 	export let events: TraceEvent[] = [];
 	export let threads: string[] = [];
+	export let onEventDoubleClick: ((event: TraceEvent) => void) | undefined = undefined;
 
 	let container: HTMLDivElement;
 	let stage: Stage | null = null;
@@ -30,7 +31,7 @@
 
 	// Color scheme
 	const COLORS = {
-		txSpan: 'rgba(200, 200, 200, 0.3)',
+		txSpan: '#a78bfa', // purple-400 - more visible for transaction spans
 		sqlFast: '#3b82f6', // blue-600
 		sqlSlow: '#ef4444', // red-600
 		txBegin: '#6b7280', // gray-500
@@ -209,6 +210,12 @@
 				selectedEvent.set(event);
 			});
 
+			marker.on('dblclick', () => {
+				if (onEventDoubleClick) {
+					onEventDoubleClick(event);
+				}
+			});
+
 			marker.on('mouseenter', () => {
 				container.style.cursor = 'pointer';
 			});
@@ -227,22 +234,28 @@
 				height: EVENT_HEIGHT,
 				fill: color,
 				cornerRadius: event.type === 'tx_span' ? 0 : 2,
-				opacity: event.type === 'tx_span' ? 0.3 : 1
+				opacity: event.type === 'tx_span' ? 0.6 : 1 // Increased from 0.3 to 0.6 for better visibility
 			});
 
 			rect.on('click', () => {
 				selectedEvent.set(event);
 			});
 
+			rect.on('dblclick', () => {
+				if (onEventDoubleClick) {
+					onEventDoubleClick(event);
+				}
+			});
+
 			rect.on('mouseenter', () => {
 				container.style.cursor = 'pointer';
-				rect.opacity(event.type === 'tx_span' ? 0.5 : 0.8);
+				rect.opacity(event.type === 'tx_span' ? 0.8 : 0.8); // Increased hover opacity
 				timelineLayer!.batchDraw();
 			});
 
 			rect.on('mouseleave', () => {
 				container.style.cursor = 'default';
-				rect.opacity(event.type === 'tx_span' ? 0.3 : 1);
+				rect.opacity(event.type === 'tx_span' ? 0.6 : 1); // Match default opacity
 				timelineLayer!.batchDraw();
 			});
 

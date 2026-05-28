@@ -42,6 +42,8 @@ export interface TraceEvent {
 	// Derived span-specific
 	spanStartEventId?: number;
 	spanEndEventId?: number;
+	spanStartLine?: number; // Line number of the begin event
+	spanEndLine?: number;   // Line number of the commit/rollback event
 }
 
 export interface TraceFileMetadata {

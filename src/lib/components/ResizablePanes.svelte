@@ -61,16 +61,15 @@
 				<slot name="first" />
 			</div>
 			
-			<div
-				class="h-1 bg-gray-200 hover:bg-blue-400 cursor-row-resize flex-shrink-0 relative group"
+			<button
+				class="h-1 bg-gray-200 hover:bg-blue-400 cursor-row-resize flex-shrink-0 relative group w-full"
 				on:mousedown={startDrag}
-				role="separator"
-				tabindex="0"
+				aria-label="Resize panes vertically"
 			>
-				<div class="absolute inset-0 flex items-center justify-center">
+				<div class="absolute inset-0 flex items-center justify-center pointer-events-none">
 					<div class="w-12 h-1 bg-gray-400 rounded group-hover:bg-blue-500"></div>
 				</div>
-			</div>
+			</button>
 			
 			<div style="height: {100 - size}%;" class="overflow-hidden flex-1">
 				<slot name="second" />
@@ -83,16 +82,15 @@
 				<slot name="first" />
 			</div>
 			
-			<div
-				class="w-1 bg-gray-200 hover:bg-blue-400 cursor-col-resize flex-shrink-0 relative group"
+			<button
+				class="w-1 bg-gray-200 hover:bg-blue-400 cursor-col-resize flex-shrink-0 relative group h-full"
 				on:mousedown={startDrag}
-				role="separator"
-				tabindex="0"
+				aria-label="Resize panes horizontally"
 			>
-				<div class="absolute inset-0 flex items-center justify-center">
+				<div class="absolute inset-0 flex items-center justify-center pointer-events-none">
 					<div class="h-12 w-1 bg-gray-400 rounded group-hover:bg-blue-500"></div>
 				</div>
-			</div>
+			</button>
 			
 			<div style="width: {100 - size}%;" class="overflow-hidden flex-1">
 				<slot name="second" />

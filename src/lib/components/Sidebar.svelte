@@ -4,6 +4,7 @@
 		activeThreads,
 		methodFilter,
 		minDuration,
+		minSpanDuration,
 		activeSqlModes,
 		availableThreads,
 		availableSqlModes,
@@ -203,11 +204,11 @@
 			{/if}
 		</div>
 
-		<!-- Duration Filter -->
+		<!-- SQL Duration Filter -->
 		<div>
 			<div class="flex items-center gap-2 mb-2">
 				<Clock class="w-4 h-4 text-gray-600" />
-				<h3 class="font-medium text-gray-900">Min Duration</h3>
+				<h3 class="font-medium text-gray-900">Min SQL Duration</h3>
 			</div>
 
 			<div class="space-y-2">
@@ -224,6 +225,33 @@
 					<span class="font-medium text-blue-600">{$minDuration}ms</span>
 					<span>1000ms</span>
 				</div>
+			</div>
+		</div>
+
+		<!-- Transaction Span Duration Filter -->
+		<div>
+			<div class="flex items-center gap-2 mb-2">
+				<Clock class="w-4 h-4 text-gray-600" />
+				<h3 class="font-medium text-gray-900">Min Span Duration</h3>
+			</div>
+
+			<div class="space-y-2">
+				<input
+					type="range"
+					min="0"
+					max="5000"
+					step="50"
+					bind:value={$minSpanDuration}
+					class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+				/>
+				<div class="flex justify-between text-xs text-gray-600">
+					<span>0ms</span>
+					<span class="font-medium text-blue-600">{$minSpanDuration}ms</span>
+					<span>5000ms</span>
+				</div>
+				<p class="text-xs text-gray-500 italic">
+					Filters transaction spans only. SQL events within long spans remain visible.
+				</p>
 			</div>
 		</div>
 

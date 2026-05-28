@@ -9,7 +9,13 @@ A high-performance, client-side Single Page Application for analyzing large Java
 - ✅ **Web Worker Architecture**: Off-main-thread processing keeps UI responsive
 - ✅ **IndexedDB Storage**: Efficient local storage via Dexie.js
 - ✅ **Synthetic Time Offsets**: Prevents visual overlap of SQL events in the same second
-- ✅ **Transaction Span Derivation**: Automatically matches begin/commit/rollback events
+- ✅ **Transaction Span Derivation**: Automatically matches begin/commit/rollback events with LIFO algorithm
+- ✅ **Smart Call Stack Analysis**:
+  - Derives transaction span call stacks from begin/end events
+  - Computes longest common suffix from bottom up
+  - Strips redundant portions from child events in grouped view
+- ✅ **Interactive Timeline**: Konva.js-based canvas visualization with pan, zoom, and double-click expansion
+- ✅ **Advanced Filtering**: Filter by thread, duration, SQL mode, and method name
 - ✅ **Test-First Development**: Comprehensive unit tests with 100% pass rate
 
 ## Tech Stack
@@ -19,7 +25,7 @@ A high-performance, client-side Single Page Application for analyzing large Java
 - **Styling**: Tailwind CSS
 - **Database**: Dexie.js (IndexedDB wrapper)
 - **XML Parsing**: saxes (streaming parser)
-- **Visualization**: Konva.js (planned)
+- **Visualization**: Konva.js (HTML5 Canvas)
 - **Icons**: Lucide Svelte
 - **Testing**: Vitest + Testing Library
 

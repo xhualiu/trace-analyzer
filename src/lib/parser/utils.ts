@@ -6,6 +6,72 @@
 import type { ParsedParameter, TxLifecycleEvent } from '../types';
 
 /**
+ * Find the longest common suffix between two call stacks
+ * Call stacks are compared from the bottom (end) up
+ * @param stack1 First call stack string
+ * @param stack2 Second call stack string
+ * @returns The longest common suffix, or the first stack if second is missing
+ */
+export function findLongestCommonCallStackSuffix(stack1?: string, stack2?: string): string | undefined {
+	if (!stack1 && !stack2) return undefined;
+	if (!stack1) return stack2;
+	if (!stack2) return stack1;
+	
+	// Split stacks into lines and reverse to compare from bottom up
+	const lines1 = stack1.split('\n').map(l => l.trim()).filter(l => l.length > 0).reverse();
+	const lines2 = stack2.split('\n').map(l => l.trim()).filter(l => l.length > 0).reverse();
+	
+	// Find common suffix
+	const commonLines: string[] = [];
+	const minLength = Math.min(lines1.length, lines2.length);
+	
+	for (let i = 0; i < minLength; i++) {
+		if (lines1[i] === lines2[i]) {
+			commonLines.push(lines1[i]);
+		} else {
+			break; // Stop at first difference
+		}
+	}
+	
+	// If no common lines, return the first stack
+	if (commonLines.length === 0) {
+		return stack1;
+	}
+	
+	// Reverse back to normal order (top to bottom)
+	return commonLines.reverse().join('\n');
+}
+
+/**
+ * Remove the common suffix from a call stack
+ * @param fullStack The complete call stack
+ * @param commonSuffix The common suffix to remove
+ * @returns The remaining unique portion of the call stack, or undefined if nothing remains
+ */
+export function removeCommonCallStackSuffix(fullStack?: string, commonSuffix?: string): string | undefined {
+	if (!fullStack) return undefined;
+	if (!commonSuffix) return fullStack;
+	
+	const fullLines = fullStack.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+	const suffixLines = commonSuffix.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+	
+	// If the full stack is the same as or shorter than the suffix, return undefined (nothing unique)
+	if (fullLines.length <= suffixLines.length) {
+		// Check if they're identical
+		const allMatch = fullLines.every((line, i) => {
+			const suffixIndex = suffixLines.length - fullLines.length + i;
+			return suffixIndex >= 0 && line === suffixLines[suffixIndex];
+		});
+		return allMatch ? undefined : fullStack;
+	}
+	
+	// Remove the suffix lines from the end
+	const uniqueLines = fullLines.slice(0, fullLines.length - suffixLines.length);
+	
+	return uniqueLines.length > 0 ? uniqueLines.join('\n') : undefined;
+}
+
+/**
  * Parse Java Date.toString() format to epoch milliseconds
  * Format: "Wed Apr 01 20:43:31 GMT 2026"
  * Returns milliseconds rounded to the second
@@ -93,23 +159,28 @@ export class SyntheticOffsetCalculator {
  * Tracks unmatched begin events per thread to match with commit/rollback
  */
 export class TransactionSpanMatcher {
-	private unmatchedBegins = new Map<string, Array<{ eventId: number; startTime: number }>>();
+	private unmatchedBegins = new Map<string, Array<{
+		eventId: number;
+		startTime: number;
+		lineNumber?: number;
+		callStack?: string;
+	}>>();
 
 	/**
 	 * Register a begin transaction event
 	 */
-	registerBegin(thread: string, eventId: number, startTime: number): void {
+	registerBegin(thread: string, eventId: number, startTime: number, lineNumber?: number, callStack?: string): void {
 		if (!this.unmatchedBegins.has(thread)) {
 			this.unmatchedBegins.set(thread, []);
 		}
-		this.unmatchedBegins.get(thread)!.push({ eventId, startTime });
+		this.unmatchedBegins.get(thread)!.push({ eventId, startTime, lineNumber, callStack });
 	}
 
 	/**
 	 * Match a commit/rollback with the most recent unmatched begin
 	 * Returns the matched begin event or null if no match found
 	 */
-	matchEnd(thread: string): { eventId: number; startTime: number } | null {
+	matchEnd(thread: string): { eventId: number; startTime: number; lineNumber?: number; callStack?: string } | null {
 		const begins = this.unmatchedBegins.get(thread);
 		if (!begins || begins.length === 0) {
 			return null;
@@ -121,8 +192,47 @@ export class TransactionSpanMatcher {
 	/**
 	 * Get all unmatched begins (for diagnostics)
 	 */
-	getUnmatchedBegins(): Map<string, Array<{ eventId: number; startTime: number }>> {
+	getUnmatchedBegins(): Map<string, Array<{ eventId: number; startTime: number; lineNumber?: number; callStack?: string }>> {
 		return new Map(this.unmatchedBegins);
+	}
+
+	/**
+	 * Create synthetic spans for all unmatched begins
+	 * These represent transactions that started but never ended in the trace file
+	 * @param lastLineNumber The last line number in the file
+	 * @returns Array of synthetic span events
+	 */
+	createSyntheticSpansForUnmatchedBegins(lastLineNumber: number): Array<{
+		thread: string;
+		startTime: number;
+		spanStartEventId: number;
+		spanStartLine: number;
+		spanEndLine: number;
+		callStack?: string;
+	}> {
+		const syntheticSpans: Array<{
+			thread: string;
+			startTime: number;
+			spanStartEventId: number;
+			spanStartLine: number;
+			spanEndLine: number;
+			callStack?: string;
+		}> = [];
+
+		for (const [thread, begins] of this.unmatchedBegins.entries()) {
+			for (const begin of begins) {
+				syntheticSpans.push({
+					thread,
+					startTime: begin.startTime,
+					spanStartEventId: begin.eventId,
+					spanStartLine: begin.lineNumber ?? 0,
+					spanEndLine: lastLineNumber,
+					callStack: begin.callStack
+				});
+			}
+		}
+
+		return syntheticSpans;
 	}
 
 	/**
